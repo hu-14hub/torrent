@@ -119,7 +119,7 @@
     "update": "https://raw.githubusercontent.com/hu-14hub/torrent/main/hayase/index.json",
     "code": "https://raw.githubusercontent.com/hu-14hub/torrent/main/dist/toonshub.js"
   },
-  {
+{
     "manifestVersion": 2,
     "name": "TsukiHime",
     "id": "custom.tsukihime",
@@ -138,5 +138,25 @@
     "icon": "https://tsukihime.org/favicon.ico",
     "update": "https://raw.githubusercontent.com/hu-14hub/torrent/main/hayase/index.json",
     "code": "https://raw.githubusercontent.com/hu-14hub/torrent/main/dist/tsukihime.js"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "Nekobt",
+    "id": "custom.nekobt",
+    "version": "1.0.0",
+    "type": "torrent",
+    "accuracy": "high",
+    "updatePeers": false,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9uZXrvYnIub3Jn",
+    "description": "Nekobt anime torrent search via JSON API.",
+    "icon": "https://nekobt.to/favicon.ico",
+    "update": "https://raw.githubusercontent.com/hu-14hub/torrent/main/hayase/index.json",
+    "code": "https://raw.githubusercontent.com/hu-14hub/torrent/main/dist/nekobt.js"
   }
-]
+  ]
