@@ -49,7 +49,7 @@ function looksLikeBatch(title) {
 }
 
 // src/animetosho.js
-var BASE = "https://feed.animetosho.org/json";
+var BASE = "https://animetosho.net/json";
 async function fetchJson(url) {
   const res = await httpGet(url);
   if (!res.ok) throw new Error("AnimeTosho returned HTTP " + res.status);

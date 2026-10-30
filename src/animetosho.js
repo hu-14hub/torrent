@@ -1,7 +1,7 @@
 import { buildMagnet, hitsExclusion, looksLikeBatch, finalize } from './lib/shared.js'
 import { httpGet } from './lib/shared.js'
 
-const BASE = 'https://feed.animetosho.org/json'
+const BASE = 'https://animetosho.net/json'
 const SOURCE_DEFAULT = 'high'
 
 async function fetchJson (url) {
