@@ -1,0 +1,142 @@
+[
+  {
+    "manifestVersion": 2,
+    "name": "Nyaa",
+    "id": "custom.nyaa",
+    "version": "1.0.0",
+    "type": "torrent",
+    "accuracy": "medium",
+    "updatePeers": false,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9ueWFhLnNp",
+    "description": "Searches nyaa.si directly for anime torrents. Full firehose, string-search matched, strict episode filter.",
+    "icon": "https://nyaa.si/static/favicon.png",
+    "update": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/hayase/index.json",
+    "code": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/dist/nyaa.js"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "AnimeTosho",
+    "id": "custom.animetosho",
+    "version": "1.0.0",
+    "type": "torrent",
+    "accuracy": "high",
+    "updatePeers": false,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9mZWVkLmFuaW1ldG9zaG8ub3Jn",
+    "description": "Aggregator with exact ID lookup. Replace the `url` field with your custom domain's base64 value.",
+    "icon": "https://feed.animetosho.org/favicon.ico",
+    "update": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/hayase/index.json",
+    "code": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/dist/animetosho.js"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "Seadex",
+    "id": "custom.seadex",
+    "version": "1.0.0",
+    "type": "torrent",
+    "accuracy": "high",
+    "updatePeers": true,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9yZWxlYXNlcy5tb2U=",
+    "description": "Manually curated best releases per anime, looked up by AniList ID.",
+    "icon": "https://releases.moe/favicon.png",
+    "update": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/hayase/index.json",
+    "code": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/dist/seadex.js"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "SubsPlease",
+    "id": "custom.subsplease",
+    "version": "1.0.0",
+    "type": "torrent",
+    "accuracy": "high",
+    "updatePeers": true,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9zdWJzcGxlYXNlLm9yZw==",
+    "description": "Direct API for currently-airing weekly fansubs from SubsPlease.",
+    "icon": "https://subsplease.org/favicon.ico",
+    "update": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/hayase/index.json",
+    "code": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/dist/subsplease.js"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "Yameii (Dubs)",
+    "id": "custom.yameii",
+    "version": "1.0.0",
+    "type": "torrent",
+    "accuracy": "high",
+    "updatePeers": false,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9ueWFhLnNp",
+    "description": "English dub uploads from Yameii on nyaa.si.",
+    "icon": "https://nyaa.si/static/favicon.png",
+    "update": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/hayase/index.json",
+    "code": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/dist/yameii.js"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "ToonsHub",
+    "id": "custom.toonshub",
+    "version": "1.0.0",
+    "type": "torrent",
+    "accuracy": "high",
+    "updatePeers": false,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly9ueWFhLnNp",
+    "description": "ToonsHub releases on nyaa.si. Dual-audio and subbed variants.",
+    "icon": "https://nyaa.si/static/favicon.png",
+    "update": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/hayase/index.json",
+    "code": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/dist/toonshub.js"
+  },
+  {
+    "manifestVersion": 2,
+    "name": "TsukiHime",
+    "id": "custom.tsukihime",
+    "version": "1.0.0",
+    "type": "torrent",
+    "accuracy": "high",
+    "updatePeers": false,
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "nsfw": false,
+    "url": "aHR0cHM6Ly90c3VraWhpbWUub3JnLw==",
+    "description": "TsukiHime anime release index (https://tsukihime.org/). Added as an episode source for torrent lookups.",
+    "icon": "https://tsukihime.org/favicon.ico",
+    "update": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/hayase/index.json",
+    "code": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/dist/tsukihime.js"
+  }
+]

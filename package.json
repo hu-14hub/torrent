@@ -1,0 +1,14 @@
+{
+  "name": "hayase-extension-pack",
+  "version": "1.0.0",
+  "description": "Custom Hayase torrent extension pack with AnimeTosho (custom domain) and TsukiHime",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsup",
+    "test": "echo \"No tests configured\""
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0"
+  },
+  "license": "GPL-3.0"
+}
