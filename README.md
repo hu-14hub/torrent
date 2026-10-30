@@ -1,94 +1,122 @@
-# Hayase Extension Pack (Custom)
+# Hayase Extension Pack — Torrent Sources
 
-A custom Hayase / Mihon torrent extension pack with **7 sources**:
-Nyaa, AnimeTosho (custom domain), Seadex, SubsPlease, Yameii, ToonsHub,
-and **TsukiHime** (`https://tsukihime.org/`).
+A professional Hayase / Mihon extension pack providing **7 auto-updating anime torrent sources**:
 
-Based on the [anitorrent](https://github.com/anh9000/anitorrent) structure.
+| # | Source | ID | Site | Accuracy | Best For |
+|---|--------|-----|------|----------|----------|
+| 1 | Nyaa | `custom.nyaa` | nyaa.si | Medium | Raw firehose search, every anime upload |
+| 2 | AnimeTosho | `custom.animetosho` | feed.animetosho.net | High | Aggregator with exact ID lookup |
+| 3 | Seadex | `custom.seadex` | releases.moe | High | Community-curated best releases |
+| 4 | SubsPlease | `custom.subsplease` | subsplease.org | High | Currently-airing weekly fansubs |
+| 5 | Yameii (Dubs) | `custom.yameii` | nyaa.si | High | English dub uploads (single uploader) |
+| 6 | ToonsHub | `custom.toonshub` | nyaa.si | High | Dual-audio and subbed variants |
+| 7 | TsukiHime | `custom.tsukihime` | api.tsukihime.org | High | Anime release index via public API |
 
-**Repository:** https://github.com/hu-14hub/torrent
+**Repository:** https://github.com/hu-14hub/torrent  
+**License:** GPL-3.0
 
-## Files
+---
 
-```
-hayase-extension-pack/
-├── hayase/index.json          # Extension manifest (import URL for Hayase)
-├── package.json               # npm project config
-├── tsup.config.js             # Bundler config (builds dist/*.js)
-├── README.md
-├── src/
-│   ├── lib/shared.js          # Shared HTTP, magnet, RSS helpers
-│   ├── nyaa.js                # Nyaa source
-│   ├── animetosho.js          # AnimeTosho (custom domain)
-│   ├── seadex.js              # Seadex source
-│   ├── subsplease.js          # SubsPlease source
-│   ├── yameii.js              # Yameii (dubs) source
-│   ├── toonshub.js            # ToonsHub source
-│   └── tsukihime.js           # TsukiHime source (https://tsukihime.org/)
-└── dist/                      # Built extension bundles (hosted on GitHub)
-```
+## Installation
 
-## What this pack does
+### Import into Hayase
 
-| # | Source | ID | Site | Notes |
-|---|--------|-----|------|-------|
-| 1 | Nyaa | `custom.nyaa` | nyaa.si | Raw firehose search |
-| 2 | AnimeTosho | `custom.animetosho` | `feed.animetosho.org` | Replace `url` in index.json with your custom domain |
-| 3 | Seadex | `custom.seadex` | releases.moe | Curated best releases |
-| 4 | SubsPlease | `custom.subsplease` | subsplease.org | Weekly fansubs |
-| 5 | Yameii (Dubs) | `custom.yameii` | nyaa.si | English dub uploads |
-| 6 | ToonsHub | `custom.toonshub` | nyaa.si | Dual-audio / subbed |
-| 7 | **TsukiHime** | `custom.tsukihime` | **tsukihime.org** | **New episode source** |
+1. Open **Hayase**.
+2. Navigate to **Settings → Extensions → Repositories**.
+3. Paste the manifest URL:
 
-## Install in Hayase
-
-1. Open Hayase.
-2. Go to **Settings > Extensions > Repositories**.
-3. Paste this manifest URL:
    ```
    https://raw.githubusercontent.com/hu-14hub/torrent/main/hayase/index.json
    ```
+
 4. Click **Import Extensions**.
-5. Go to the **Extensions** tab and toggle each source on/off as desired.
+5. Go to the **Extensions** tab and toggle each source on or off as desired.
 
-Hayase auto-polls the `update` URL on every launch, so future updates flow in
-automatically — just restart Hayase.
+Hayase automatically polls the `update` URL on every launch, so future updates are applied automatically — simply restart Hayase to receive new versions.
 
-## Step 1: Replace the AnimeTosho domain (optional)
+---
 
-In `hayase/index.json`, find the AnimeTosho entry and change its `url` field:
+## Configuration
 
-```json
-"url": "aHR0cHM6Ly9mZWVkLmFuaW1ldG9zaG8ub3Jn",
+### Replace the AnimeTosho Domain (Optional)
+
+The AnimeTosho extension is pre-configured for `feed.animetosho.net`. To use your own mirror:
+
+1. In `hayase/index.json`, update the AnimeTosho entry's `url` field with the Base64-encoded value of your domain URL:
+
+   ```powershell
+   [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes('https://your-domain.com'))
+   ```
+
+2. Update the `BASE` constant in `src/animetosho.js`:
+
+   ```js
+   const BASE = 'https://your-domain.com/json'
+   ```
+
+3. Rebuild and redeploy (see **Build & Deploy** below).
+
+---
+
+## Build & Deploy
+
+The extension bundles in `dist/` are compiled from `src/` using [tsup](https://tsup.egoist.dev/).
+
+### Prerequisites
+
+- Node.js (v18 or later)
+- npm
+
+### Build
+
+```bash
+npm install
+npm run build
 ```
 
-That value is Base64 for `https://feed.animetosho.org`. To use your own domain:
+This generates the following files in `dist/`:
 
-1. Take your domain URL, e.g. `https://my-animetosho-mirror.com`
-2. Base64-encode it (PowerShell):
-   ```powershell
-   [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes('https://my-animetosho-mirror.com'))
-   ```
-3. Replace the `url` value in `hayase/index.json`.
-4. Also update the `BASE` constant in `src/animetosho.js`:
-   ```js
-   const BASE = 'https://my-animetosho-mirror.com'
-   ```
+- `nyaa.js`
+- `animetosho.js`
+- `seadex.js`
+- `subsplease.js`
+- `yameii.js`
+- `toonshub.js`
+- `tsukihime.js`
 
-## Step 2: Configure TsukiHime
+### Deploy
 
-TsukiHime's homepage loads content via JavaScript, so the extension needs the real
-API/search endpoint. In `src/tsukihime.js`:
+Host the `dist/` directory on a public static file host (GitHub raw, GitHub Pages, etc.), then update every `code` and `update` URL in `hayase/index.json` to point to your hosted bundles.
 
-1. Update `fetchTsukihime()` to point at TsukiHime's actual search/API URL.
-2. Update `parseItem()` to match the JSON fields or HTML selectors TsukiHime returns.
+---
 
-Open TsukiHime in your browser, press **F12 → Network**, search for an anime, and look
-for the XHR/fetch request. Copy its URL and response shape into `src/tsukihime.js`.
+## Project Structure
 
-## Extension API (for adding more sources)
+```
+hayase-extension-pack/
+├── hayase/
+│   └── index.json          # Extension manifest (import URL for Hayase)
+├── src/
+│   ├── lib/
+│   │   └── shared.js       # Shared HTTP, magnet, and matching helpers
+│   ├── nyaa.js             # Nyaa source
+│   ├── animetosho.js       # AnimeTosho source (custom domain)
+│   ├── seadex.js           # Seadex source
+│   ├── subsplease.js       # SubsPlease source
+│   ├── yameii.js           # Yameii (dubs) source
+│   ├── toonshub.js         # ToonsHub source
+│   └── tsukihime.js        # TsukiHime source (public API)
+├── dist/                   # Built extension bundles
+├── package.json            # npm project configuration
+├── tsup.config.js          # Bundler configuration
+└── README.md
+```
 
-Each source exports a default object with these methods:
+---
+
+## Extension API
+
+Each source exports a default object with the following methods:
 
 | Method | Purpose |
 |--------|---------|
@@ -97,11 +125,39 @@ Each source exports a default object with these methods:
 | `movie(query)` | Search for movies |
 | `test()` | Connection check (runs on Hayase launch) |
 
-The `query` object contains: `titles` (array of strings), `episode` (number),
-`anilistId`, `episodeCount`, `exclusions`, `episodeCandidates`.
+### Query Object
 
-Each result must return: `title`, `link` (magnet URL), `hash`, `seeders`,
-`leechers`, `size`, `date`, `accuracy`, `type` (optional: `'batch'`).
+| Property | Type | Description |
+|----------|------|-------------|
+| `titles` | `string[]` | Anime titles to search for |
+| `episode` | `number` | Target episode number |
+| `episodeCount` | `number` | Total episode count of the anime |
+| `anilistId` | `number` | AniList ID |
+| `anidbAid` | `number` | AniDB anime ID |
+| `anidbEid` | `number` | AniDB episode ID |
+| `exclusions` | `string[]` | Keywords to exclude from results |
+| `episodeCandidates` | `Set<number>` | Alternative episode numbers to match |
+| `showSeason` | `number` | Season number |
+| `showYears` | `number[]` | Release years |
+
+### Result Object
+
+Each result must return:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `title` | `string` | Release title |
+| `link` | `string` | Magnet URL |
+| `hash` | `string` | Torrent info hash (lowercase) |
+| `seeders` | `number` | Seed count |
+| `leechers` | `number` | Leech count |
+| `downloads` | `number` | Download count |
+| `size` | `number` | File size in bytes |
+| `date` | `Date` | Release date |
+| `accuracy` | `string` | Match accuracy (`high`, `medium`, `low`) |
+| `type` | `string` | Optional: `'batch'` for batch releases |
+
+---
 
 ## License
 
