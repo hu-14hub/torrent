@@ -1,134 +1,107 @@
-import {
-  buildMagnet, parseSize, pickTag, pickItems, httpGet,
-  buildQueries, searchContext, collectFeed, finalize, hitsExclusion, decodeEntities
-} from './lib/shared.js'
+import { buildMagnet, hitsExclusion, looksLikeBatch, finalize } from './lib/shared.js'
+import { httpGet } from './lib/shared.js'
 
 // TsukiHime extension source (https://tsukihime.org/)
-// NOTE: TsukiHime's pages appear to be JavaScript-rendered. You will need to
-// inspect the site's network tab (F12) to find the exact JSON API or HTML
-// selectors, then update the fetchTsukihime() and parseItem() functions below.
+// Uses the public API: https://api.tsukihime.org/v1/search/torrents?q=<query>&limit=30&offset=0
 
-const BASE = 'https://tsukihime.org'
+const BASE = 'https://api.tsukihime.org/v1/search/torrents'
 const SOURCE_DEFAULT = 'high'
 
-// Helper: convert a relative or absolute URL to absolute
-function absoluteUrl (href) {
-  if (!href) return ''
-  if (href.startsWith('http')) return href
-  if (href.startsWith('/')) return BASE + href
-  return BASE + '/' + href
-}
-
 async function fetchTsukihime (query) {
-  // TODO: Replace this with TsukiHime's actual search/API endpoint.
-  // Common patterns:
-  //   GET https://tsukihime.org/api/search?q=<query>
-  //   GET https://tsukihime.org/animes?q=<query>
-  //   GET https://tsukihime.org/search?query=<query>
-  //
-  // The current homepage returned no server-rendered release list, so the site
-  // likely loads data via JavaScript. Inspect the Network tab in DevTools to
-  // find the real endpoint and update this URL accordingly.
-  const url = BASE + '/api/search?q=' + encodeURIComponent(query)
+  const url = BASE + '?q=' + encodeURIComponent(query) + '&limit=30&offset=0'
   let res
   try {
     res = await httpGet(url)
   } catch (err) {
-    // If the API endpoint doesn't exist yet, return empty results
-    // and log so the developer knows to update it.
     console.warn('[TsukiHime] Search endpoint not reachable:', err.message)
     return []
   }
   if (!res.ok) return []
-
-  const contentType = res.headers && res.headers.get ? res.headers.get('content-type') : ''
-  if (contentType.includes('application/json')) {
-    return await res.json()
-  }
-  const text = await res.text()
-  return pickItems(text)
+  const data = await res.json()
+  if (!data || !Array.isArray(data.results)) return []
+  return data.results
 }
 
-// TODO: Update this parser to match TsukiHime's actual data structure.
-// If the API returns JSON, parse the JSON array directly.
-// If it returns HTML, use pickItems + pickTag to extract <item> elements.
-function parseItem (raw, opts) {
-  let title, hash, size, seeders, leechers, date
-
-  if (typeof raw === 'object' && raw !== null) {
-    // JSON API response
-    title = raw.title || raw.name || raw.release_title || ''
-    hash = raw.info_hash || raw.hash || raw.infohash || ''
-    size = raw.size || raw.size_bytes || 0
-    seeders = raw.seeders || raw.seeds || 0
-    leechers = raw.leechers || raw.peers || 0
-    date = raw.date || raw.pubDate || raw.uploaded_at || new Date()
-  } else {
-    // HTML/RSS fallback
-    title = pickTag(raw, 'title')
-    hash = pickTag(raw, 'infoHash') || pickTag(raw, 'hash') || ''
-    size = parseSize(pickTag(raw, 'size'))
-    seeders = parseInt(pickTag(raw, 'seeders'), 10) || 0
-    leechers = parseInt(pickTag(raw, 'leechers'), 10) || 0
-    date = pickTag(raw, 'pubDate') || new Date()
-  }
-
+function toResult (item) {
+  const title = item.name || ''
+  const hash = item.btih || ''
   if (!title || !hash) return null
-  if (hitsExclusion(title, opts.exclusions)) return null
 
-  const hashLower = String(hash).toLowerCase()
-  const parsedDate = date ? new Date(date) : new Date()
-  const dateObj = Number.isFinite(parsedDate.getTime()) ? parsedDate : new Date(0)
+  const size = Number(item.totalsize) || 0
+  const date = item.added_date ? new Date(item.added_date * 1000) : new Date()
+  const episode = item.episode_no != null ? item.episode_no : null
 
   return {
-    title: decodeEntities(title),
-    link: buildMagnet(hashLower, title),
-    hash: hashLower,
-    seeders,
-    leechers,
+    title,
+    link: buildMagnet(hash, title),
+    hash: String(hash).toLowerCase(),
+    seeders: 0,
+    leechers: 0,
     downloads: 0,
-    size: typeof size === 'number' ? size : parseSize(String(size)),
-    date: dateObj,
+    size,
+    date,
+    episode,
     accuracy: 'high',
     type: undefined
   }
 }
 
-async function runSearch (query, opts) {
-  if (!query.titles || !query.titles.length) return []
-  const ctx = searchContext(query, opts.batch ? 'batch' : 'single')
-  const queries = buildQueries(query.titles, { limit: 2, episode: query.episode, anilistId: query.anilistId })
-  const shaped = await collectFeed(
-    queries,
-    fetchTsukihime,
-    raw => parseItem(raw, { exclusions: ctx.exclusions }),
-    ctx,
-    SOURCE_DEFAULT
-  )
-  return finalize(shaped, ctx)
+async function runSearch (query, mode) {
+  if (!query || !query.titles || !query.titles.length) return []
+  const ctx = { mode, exclusions: query.exclusions || [], episode: query.episode }
+  const seen = new Map()
+  const allQueries = []
+
+  for (const t of query.titles) {
+    allQueries.push(String(t).trim())
+    if (query.episode != null) {
+      allQueries.push(String(t).trim() + ' ' + query.episode)
+    }
+  }
+
+  for (const q of allQueries) {
+    try {
+      const items = await fetchTsukihime(q)
+      for (const item of items) {
+        const r = toResult(item)
+        if (r && !seen.has(r.hash)) {
+          if (hitsExclusion(r.title, ctx.exclusions)) continue
+          seen.set(r.hash, r)
+        }
+      }
+    } catch { continue }
+  }
+
+  let results = [...seen.values()]
+
+  // Filter by episode if specified and not batch mode
+  if (mode !== 'batch' && ctx.episode != null) {
+    const epFiltered = results.filter(r => {
+      if (r.episode == null) return true // include results without episode info
+      return r.episode === ctx.episode
+    })
+    if (epFiltered.length > 0) results = epFiltered
+  }
+
+  return finalize(results, ctx)
 }
 
 export default new class TsukiHime {
   async single (query) {
-    return runSearch(query, { episode: query.episode })
+    return runSearch(query, 'single')
   }
 
   async batch (query) {
-    const results = await runSearch(query, { batch: true })
-    return results.filter(r => /batch|complete|season/i.test(r.title))
+    const results = await runSearch(query, 'batch')
+    return results.filter(r => looksLikeBatch(r.title)).map(r => ({ ...r, type: 'batch', accuracy: 'low' }))
   }
 
   async movie (query) {
-    return runSearch(query, { movie: true })
+    return runSearch(query, 'movie')
   }
 
   async test () {
-    try {
-      await fetchTsukihime('one piece')
-      return true
-    } catch (err) {
-      console.warn('[TsukiHime] test() failed:', err.message)
-      return false
-    }
+    const items = await fetchTsukihime('one piece')
+    return Array.isArray(items) && items.length > 0
   }
 }()
