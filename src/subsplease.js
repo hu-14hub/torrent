@@ -1,83 +1,167 @@
-import {
-  buildMagnet, parseSize, pickTag, pickItems, httpGet,
-  buildQueries, searchContext, collectFeed, finalize, hitsExclusion
-} from './lib/shared.js'
+import { buildMagnet, hitsExclusion, looksLikeBatch, finalize } from './lib/shared.js'
+import { httpGet } from './lib/shared.js'
 
-const BASE = 'https://subsplease.org'
-const SOURCE_DEFAULT = 'high'
+const BASE = 'https://subsplease.org/api/'
+const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 
-async function fetchFeed (query) {
-  const url = BASE + '/api?q=' + encodeURIComponent(query)
+function base32ToHex (b32) {
+  let bits = ''
+  for (const c of b32.toUpperCase()) {
+    const idx = BASE32.indexOf(c)
+    if (idx < 0) continue
+    bits += idx.toString(2).padStart(5, '0')
+  }
+  let hex = ''
+  for (let i = 0; i + 4 <= bits.length; i += 4) {
+    hex += parseInt(bits.slice(i, i + 4), 2).toString(16)
+  }
+  return hex
+}
+
+function parseMagnet (magnet) {
+  const m = String(magnet || '')
+  const hashMatch = m.match(/xt=urn:btih:([A-Z2-7]{32}|[a-fA-F0-9]{40})/i)
+  let hash = ''
+  if (hashMatch) {
+    const raw = hashMatch[1]
+    hash = raw.length === 40 ? raw.toLowerCase() : base32ToHex(raw)
+  }
+  const sizeMatch = m.match(/[?&]xl=(\d+)/i)
+  const size = sizeMatch ? parseInt(sizeMatch[1], 10) : 0
+  return { hash, size }
+}
+
+function toEntries (data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return []
+  return Object.entries(data).map(([key, entry]) => ({ key, ...entry }))
+}
+
+async function fetchApi (url) {
   const res = await httpGet(url)
-  if (!res.ok) {
-    throw new Error('SubsPlease returned HTTP ' + res.status)
-  }
-  const text = await res.text()
-  if (!text.includes('<rss') && !text.includes('<item>')) {
-    throw new Error('SubsPlease returned an unexpected response')
-  }
-  return pickItems(text)
+  if (!res.ok) throw new Error('SubsPlease returned HTTP ' + res.status)
+  const text = (await res.text()).trim()
+  if (!text) return null
+  try { return toEntries(JSON.parse(text)) } catch { return null }
 }
 
-function itemToResult (raw, opts) {
-  const title = pickTag(raw, 'title')
-  const hash = pickTag(raw, 'infoHash') || pickTag(raw, 'nyaa:infoHash')
-  if (!title || !hash) return null
-
-  if (hitsExclusion(title, opts.exclusions)) return null
-
-  const hashLower = String(hash).toLowerCase()
-  const seeders = parseInt(pickTag(raw, 'seeders'), 10) || 0
-  const leechers = parseInt(pickTag(raw, 'leechers'), 10) || 0
-  const size = parseSize(pickTag(raw, 'size'))
-  const pubDate = pickTag(raw, 'pubDate')
-  const parsed = pubDate ? new Date(pubDate) : new Date()
-  const date = Number.isFinite(parsed.getTime()) ? parsed : new Date(0)
-
-  return {
-    title,
-    link: buildMagnet(hashLower, title),
-    hash: hashLower,
-    seeders,
-    leechers,
-    downloads: 0,
-    size,
-    date,
-    accuracy: 'high',
-    type: undefined
-  }
+async function searchApi (q) {
+  const found = await fetchApi(BASE + '?f=search&tz=UTC&s=' + encodeURIComponent(q))
+  return found || []
 }
 
-async function runSearch (query, opts) {
-  if (!query.titles || !query.titles.length) return []
-  const ctx = searchContext(query, opts.batch ? 'batch' : 'single')
-  const queries = buildQueries(query.titles, { limit: 2, episode: query.episode, anilistId: query.anilistId })
-  const shaped = await collectFeed(
-    queries,
-    fetchFeed,
-    raw => itemToResult(raw, { exclusions: ctx.exclusions }),
-    ctx,
-    SOURCE_DEFAULT
+let latestCache = null
+async function latestApi () {
+  if (!latestCache) {
+    latestCache = fetchApi(BASE + '?f=latest&tz=UTC').catch(() => null)
+  }
+  const entries = await latestCache
+  if (!entries) latestCache = null
+  return entries || []
+}
+
+function episodeMatches (entryEpisode, wanted) {
+  if (wanted == null) return true
+  const e = String(entryEpisode || '').trim()
+  if (!e) return false
+  if (e.includes('-') || e.includes('~')) return false
+  const n = parseInt(e, 10)
+  return Number.isInteger(n) && n === Number(wanted)
+}
+
+function isBatchEntry (entry) {
+  const e = String(entry.episode || '')
+  if (/\d+\s*[-~]\s*\d+/.test(e)) return true
+  if (/batch/i.test(e)) return true
+  return false
+}
+
+function entryToResults (entry, opts) {
+  const downloads = Array.isArray(entry.downloads) ? entry.downloads : []
+  const date = entry.release_date ? new Date(entry.release_date) : new Date()
+  const out = []
+  for (const dl of downloads) {
+    if (!dl || !dl.magnet) continue
+    const { hash, size } = parseMagnet(dl.magnet)
+    if (!hash) continue
+    const res = dl.res ? dl.res + 'p' : ''
+    const title = '[SubsPlease] ' + entry.key + (res ? ' (' + res + ')' : '')
+    if (hitsExclusion(title, opts.exclusions)) continue
+    out.push({
+      title,
+      link: dl.magnet,
+      hash,
+      seeders: 0,
+      leechers: 0,
+      downloads: 0,
+      size,
+      date,
+      accuracy: 'high',
+      type: undefined
+    })
+  }
+  return out
+}
+
+async function runSearch (query, mode) {
+  if (!query || !query.titles || !query.titles.length) return []
+  const ctx = { mode, exclusions: query.exclusions || [], episode: query.episode }
+  const seenKeys = new Set()
+  const entries = []
+
+  const settled = await Promise.allSettled(
+    query.titles.map(q => searchApi(q))
   )
-  return finalize(shaped, ctx)
+  for (const s of settled) {
+    if (s.status === 'rejected') continue
+    for (const e of s.value) {
+      if (seenKeys.has(e.key)) continue
+      seenKeys.add(e.key)
+      entries.push(e)
+    }
+  }
+
+  if (!entries.length) {
+    for (const e of await latestApi()) {
+      if (seenKeys.has(e.key)) continue
+      seenKeys.add(e.key)
+      entries.push(e)
+    }
+  }
+
+  const out = []
+  const seenHashes = new Set()
+  for (const e of entries) {
+    const isBatch = isBatchEntry(e)
+    if (mode === 'batch' && !isBatch) continue
+    if (mode === 'movie' && isBatch) continue
+    if (query.episode != null && !isBatch && !episodeMatches(e.episode, query.episode)) continue
+
+    for (const r of entryToResults(e, ctx)) {
+      if (seenHashes.has(r.hash)) continue
+      seenHashes.add(r.hash)
+      out.push(r)
+    }
+  }
+
+  return finalize(out, ctx)
 }
 
 export default new class SubsPlease {
   async single (query) {
-    return runSearch(query, { episode: query.episode })
+    return runSearch(query, 'single')
   }
 
   async batch (query) {
-    const results = await runSearch(query, { batch: true })
-    return results.filter(r => /batch|complete|season/i.test(r.title))
+    return runSearch(query, 'batch')
   }
 
   async movie (query) {
-    return runSearch(query, { movie: true })
+    return runSearch(query, 'movie')
   }
 
   async test () {
-    await fetchFeed('one piece')
+    const res = await httpGet(BASE + '?f=latest&tz=UTC')
+    if (!res.ok) throw new Error('SubsPlease returned HTTP ' + res.status)
     return true
   }
 }()

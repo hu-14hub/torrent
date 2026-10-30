@@ -21,103 +21,10 @@ function buildMagnet(hash, name) {
   const dn = name ? "&dn=" + encodeURIComponent(name) : "";
   return "magnet:?xt=urn:btih:" + String(hash).toLowerCase() + dn + "&" + trackers;
 }
-function parseSize(text) {
-  if (!text) return 0;
-  const m = text.match(/([\d.]+)\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB|B)/i);
-  if (!m) return 0;
-  const value = parseFloat(m[1]);
-  const unit = m[2].toLowerCase();
-  const mult = {
-    b: 1,
-    kib: 1024,
-    kb: 1e3,
-    mib: 1024 ** 2,
-    mb: 1e3 ** 2,
-    gib: 1024 ** 3,
-    gb: 1e3 ** 3,
-    tib: 1024 ** 4,
-    tb: 1e3 ** 4
-  }[unit] || 1;
-  return Math.round(value * mult);
-}
-function decodeEntities(str) {
-  return String(str).replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10))).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
-}
-function pickTag(xml, tag) {
-  const open = "<" + tag + ">";
-  const close = "</" + tag + ">";
-  const i = xml.indexOf(open);
-  if (i === -1) return "";
-  const j = xml.indexOf(close, i + open.length);
-  if (j === -1) return "";
-  let val = xml.slice(i + open.length, j);
-  if (val.startsWith("<![CDATA[") && val.endsWith("]]>")) {
-    val = val.slice(9, -3);
-  }
-  return decodeEntities(val).trim();
-}
-function pickItems(xml) {
-  const out = [];
-  let cursor = 0;
-  while (true) {
-    const start = xml.indexOf("<item>", cursor);
-    if (start === -1) break;
-    const end = xml.indexOf("</item>", start);
-    if (end === -1) break;
-    out.push(xml.slice(start + 6, end));
-    cursor = end + 7;
-  }
-  return out;
-}
 function hitsExclusion(title, exclusions) {
   if (!exclusions || !exclusions.length) return false;
   const lower = title.toLowerCase();
   return exclusions.some((kw) => kw && lower.includes(String(kw).toLowerCase()));
-}
-function buildQueries(titles, { limit = 2, episode, anilistId, episodeCandidates } = {}) {
-  const queries = [];
-  for (const title of titles) {
-    if (!title) continue;
-    const base = String(title).trim();
-    if (episode != null) {
-      queries.push(base + " " + episode);
-      if (episodeCandidates && episodeCandidates.size) {
-        for (const n of episodeCandidates) queries.push(base + " " + n);
-      }
-    } else {
-      queries.push(base);
-    }
-    if (queries.length >= limit * titles.length) break;
-  }
-  if (anilistId) queries.push("aid=" + anilistId);
-  return queries;
-}
-function searchContext(query, mode = "single") {
-  const exclusions = query.exclusions || [];
-  return {
-    mode,
-    exclusions,
-    episode: query.episode,
-    anilistId: query.anilistId
-  };
-}
-async function collectFeed(queries, fetchFn, itemMapper, ctx, defaultAccuracy) {
-  const results = [];
-  for (const q of queries) {
-    try {
-      const items = await fetchFn(q);
-      for (const raw of items) {
-        const r = itemMapper(raw, { exclusions: ctx.exclusions });
-        if (r) {
-          r.accuracy = r.accuracy || defaultAccuracy;
-          results.push(r);
-        }
-      }
-    } catch (err) {
-      continue;
-    }
-  }
-  return results;
 }
 function finalize(results, ctx) {
   const seen = /* @__PURE__ */ new Set();
@@ -129,73 +36,112 @@ function finalize(results, ctx) {
   }
   return unique;
 }
+var BATCH_PATTERNS = [
+  /\bbatch\b/i,
+  /\bcomplete\b/i,
+  /\bseason\s*\d+\b/i,
+  /\bs\d{1,2}\b(?!\s*e\d)/i,
+  /\b\d{1,3}\s*[-~]\s*\d{1,3}\b/
+];
+function looksLikeBatch(title) {
+  if (!title) return false;
+  return BATCH_PATTERNS.some((p) => p.test(title));
+}
 
 // src/animetosho.js
-var BASE = "https://feed.animetosho.org";
-var SOURCE_DEFAULT = "high";
-async function fetchFeed(query) {
-  const url = BASE + "/?q=" + encodeURIComponent(query);
+var BASE = "https://feed.animetosho.org/json";
+async function fetchJson(url) {
   const res = await httpGet(url);
-  if (!res.ok) {
-    throw new Error("AnimeTosho returned HTTP " + res.status);
-  }
-  const text = await res.text();
-  if (!text.includes("<rss") && !text.includes("<item>")) {
-    throw new Error("AnimeTosho returned an unexpected response");
-  }
-  return pickItems(text);
+  if (!res.ok) throw new Error("AnimeTosho returned HTTP " + res.status);
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 }
-function itemToResult(raw, opts) {
-  const title = pickTag(raw, "title");
-  const hash = pickTag(raw, "infoHash") || pickTag(raw, "nyaa:infoHash");
-  if (!title || !hash) return null;
-  if (hitsExclusion(title, opts.exclusions)) return null;
-  const hashLower = String(hash).toLowerCase();
-  const seeders = parseInt(pickTag(raw, "seeders"), 10) || 0;
-  const leechers = parseInt(pickTag(raw, "leechers"), 10) || 0;
-  const size = parseSize(pickTag(raw, "size"));
-  const pubDate = pickTag(raw, "pubDate");
-  const parsed = pubDate ? new Date(pubDate) : /* @__PURE__ */ new Date();
-  const date = Number.isFinite(parsed.getTime()) ? parsed : /* @__PURE__ */ new Date(0);
+function toResult(item) {
+  const hash = String(item.info_hash || item.hash || "").toLowerCase();
+  if (!hash) return null;
   return {
-    title,
-    link: buildMagnet(hashLower, title),
-    hash: hashLower,
-    seeders,
-    leechers,
-    downloads: 0,
-    size,
-    date,
-    accuracy: "high",
-    type: void 0
+    title: item.title || item.torrent_name || "",
+    link: item.magnet_uri || buildMagnet(hash, item.title || item.torrent_name || ""),
+    hash,
+    seeders: Number(item.seeders) || 0,
+    leechers: Number(item.leechers) || 0,
+    downloads: Number(item.torrent_downloaded_count || item.downloads) || 0,
+    size: Number(item.total_size || item.size) || 0,
+    date: item.timestamp ? new Date(item.timestamp * 1e3) : /* @__PURE__ */ new Date(),
+    accuracy: "high"
   };
 }
-async function runSearch(query, opts) {
-  if (!query.titles || !query.titles.length) return [];
-  const ctx = searchContext(query, opts.batch ? "batch" : "single");
-  const queries = buildQueries(query.titles, { limit: 2, episode: query.episode, anilistId: query.anilistId });
-  const shaped = await collectFeed(
-    queries,
-    fetchFeed,
-    (raw) => itemToResult(raw, { exclusions: ctx.exclusions }),
-    ctx,
-    SOURCE_DEFAULT
-  );
-  return finalize(shaped, ctx);
+async function fetchByEid(eid) {
+  const items = await fetchJson(BASE + "?eid=" + encodeURIComponent(eid));
+  return items.map(toResult).filter(Boolean);
+}
+async function fetchByAid(aid) {
+  const items = await fetchJson(BASE + "?aid=" + encodeURIComponent(aid));
+  return items.map(toResult).filter(Boolean);
+}
+async function fetchByText(query) {
+  const titles = query.titles || [];
+  if (!titles.length) return [];
+  const seen = /* @__PURE__ */ new Map();
+  const allQueries = [];
+  for (const t of titles) {
+    allQueries.push(String(t).trim());
+    if (query.episode != null) allQueries.push(String(t).trim() + " " + query.episode);
+  }
+  for (const q of allQueries) {
+    try {
+      const items = await fetchJson(BASE + "?q=" + encodeURIComponent(q));
+      for (const i of items) {
+        const r = toResult(i);
+        if (r && !seen.has(r.hash)) seen.set(r.hash, r);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return [...seen.values()];
+}
+async function search(query, mode) {
+  const ctx = { mode, exclusions: query.exclusions || [], episode: query.episode };
+  let raw = [];
+  if (mode === "single" && query.anidbEid != null) {
+    try {
+      raw = await fetchByEid(query.anidbEid);
+    } catch {
+      raw = [];
+    }
+  } else if (query.anilistId != null) {
+    try {
+      raw = await fetchByAid(query.anilistId);
+    } catch {
+      raw = [];
+    }
+  }
+  const results = raw.filter((r) => !hitsExclusion(r.title, ctx.exclusions));
+  if (query.titles && query.titles.length) {
+    const textResults = await fetchByText(query);
+    const seen = new Set(results.map((r) => r.hash));
+    for (const r of textResults) {
+      if (seen.has(r.hash)) continue;
+      seen.add(r.hash);
+      results.push(r);
+    }
+  }
+  return finalize(results, ctx);
 }
 var animetosho_default = new class AnimeTosho {
   async single(query) {
-    return runSearch(query, { episode: query.episode });
+    return search(query, "single");
   }
   async batch(query) {
-    const results = await runSearch(query, { batch: true });
-    return results.filter((r) => /batch|complete|season/i.test(r.title));
+    const results = await search(query, "batch");
+    return results.filter((r) => looksLikeBatch(r.title)).map((r) => ({ ...r, type: "batch", accuracy: "low" }));
   }
   async movie(query) {
-    return runSearch(query, { movie: true });
+    return search(query, "movie");
   }
   async test() {
-    await fetchFeed("one piece");
+    await fetchJson(BASE + "?q=test");
     return true;
   }
 }();

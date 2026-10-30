@@ -7,117 +7,10 @@ async function httpGet(url, opts = {}) {
   const { headers, ...rest } = opts;
   return fetch(url, { headers: { ...BROWSER_HEADERS, ...headers }, ...rest });
 }
-var TRACKERS = [
-  "udp://tracker.opentrackr.org:1337/announce",
-  "udp://open.stealth.si:80/announce",
-  "udp://tracker.torrent.eu.org:451/announce",
-  "udp://exodus.desync.com:6969/announce",
-  "udp://tracker.coppersurfer.tk:6969/announce",
-  "udp://tracker.openbittorrent.com:6969/announce",
-  "http://nyaa.tracker.wf:7777/announce"
-];
-function buildMagnet(hash, name) {
-  const trackers = TRACKERS.map((t) => "tr=" + encodeURIComponent(t)).join("&");
-  const dn = name ? "&dn=" + encodeURIComponent(name) : "";
-  return "magnet:?xt=urn:btih:" + String(hash).toLowerCase() + dn + "&" + trackers;
-}
-function parseSize(text) {
-  if (!text) return 0;
-  const m = text.match(/([\d.]+)\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB|B)/i);
-  if (!m) return 0;
-  const value = parseFloat(m[1]);
-  const unit = m[2].toLowerCase();
-  const mult = {
-    b: 1,
-    kib: 1024,
-    kb: 1e3,
-    mib: 1024 ** 2,
-    mb: 1e3 ** 2,
-    gib: 1024 ** 3,
-    gb: 1e3 ** 3,
-    tib: 1024 ** 4,
-    tb: 1e3 ** 4
-  }[unit] || 1;
-  return Math.round(value * mult);
-}
-function decodeEntities(str) {
-  return String(str).replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10))).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
-}
-function pickTag(xml, tag) {
-  const open = "<" + tag + ">";
-  const close = "</" + tag + ">";
-  const i = xml.indexOf(open);
-  if (i === -1) return "";
-  const j = xml.indexOf(close, i + open.length);
-  if (j === -1) return "";
-  let val = xml.slice(i + open.length, j);
-  if (val.startsWith("<![CDATA[") && val.endsWith("]]>")) {
-    val = val.slice(9, -3);
-  }
-  return decodeEntities(val).trim();
-}
-function pickItems(xml) {
-  const out = [];
-  let cursor = 0;
-  while (true) {
-    const start = xml.indexOf("<item>", cursor);
-    if (start === -1) break;
-    const end = xml.indexOf("</item>", start);
-    if (end === -1) break;
-    out.push(xml.slice(start + 6, end));
-    cursor = end + 7;
-  }
-  return out;
-}
 function hitsExclusion(title, exclusions) {
   if (!exclusions || !exclusions.length) return false;
   const lower = title.toLowerCase();
   return exclusions.some((kw) => kw && lower.includes(String(kw).toLowerCase()));
-}
-function buildQueries(titles, { limit = 2, episode, anilistId, episodeCandidates } = {}) {
-  const queries = [];
-  for (const title of titles) {
-    if (!title) continue;
-    const base = String(title).trim();
-    if (episode != null) {
-      queries.push(base + " " + episode);
-      if (episodeCandidates && episodeCandidates.size) {
-        for (const n of episodeCandidates) queries.push(base + " " + n);
-      }
-    } else {
-      queries.push(base);
-    }
-    if (queries.length >= limit * titles.length) break;
-  }
-  if (anilistId) queries.push("aid=" + anilistId);
-  return queries;
-}
-function searchContext(query, mode = "single") {
-  const exclusions = query.exclusions || [];
-  return {
-    mode,
-    exclusions,
-    episode: query.episode,
-    anilistId: query.anilistId
-  };
-}
-async function collectFeed(queries, fetchFn, itemMapper, ctx, defaultAccuracy) {
-  const results = [];
-  for (const q of queries) {
-    try {
-      const items = await fetchFn(q);
-      for (const raw of items) {
-        const r = itemMapper(raw, { exclusions: ctx.exclusions });
-        if (r) {
-          r.accuracy = r.accuracy || defaultAccuracy;
-          results.push(r);
-        }
-      }
-    } catch (err) {
-      continue;
-    }
-  }
-  return results;
 }
 function finalize(results, ctx) {
   const seen = /* @__PURE__ */ new Set();
@@ -131,71 +24,152 @@ function finalize(results, ctx) {
 }
 
 // src/subsplease.js
-var BASE = "https://subsplease.org";
-var SOURCE_DEFAULT = "high";
-async function fetchFeed(query) {
-  const url = BASE + "/api?q=" + encodeURIComponent(query);
+var BASE = "https://subsplease.org/api/";
+var BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+function base32ToHex(b32) {
+  let bits = "";
+  for (const c of b32.toUpperCase()) {
+    const idx = BASE32.indexOf(c);
+    if (idx < 0) continue;
+    bits += idx.toString(2).padStart(5, "0");
+  }
+  let hex = "";
+  for (let i = 0; i + 4 <= bits.length; i += 4) {
+    hex += parseInt(bits.slice(i, i + 4), 2).toString(16);
+  }
+  return hex;
+}
+function parseMagnet(magnet) {
+  const m = String(magnet || "");
+  const hashMatch = m.match(/xt=urn:btih:([A-Z2-7]{32}|[a-fA-F0-9]{40})/i);
+  let hash = "";
+  if (hashMatch) {
+    const raw = hashMatch[1];
+    hash = raw.length === 40 ? raw.toLowerCase() : base32ToHex(raw);
+  }
+  const sizeMatch = m.match(/[?&]xl=(\d+)/i);
+  const size = sizeMatch ? parseInt(sizeMatch[1], 10) : 0;
+  return { hash, size };
+}
+function toEntries(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+  return Object.entries(data).map(([key, entry]) => ({ key, ...entry }));
+}
+async function fetchApi(url) {
   const res = await httpGet(url);
-  if (!res.ok) {
-    throw new Error("SubsPlease returned HTTP " + res.status);
+  if (!res.ok) throw new Error("SubsPlease returned HTTP " + res.status);
+  const text = (await res.text()).trim();
+  if (!text) return null;
+  try {
+    return toEntries(JSON.parse(text));
+  } catch {
+    return null;
   }
-  const text = await res.text();
-  if (!text.includes("<rss") && !text.includes("<item>")) {
-    throw new Error("SubsPlease returned an unexpected response");
+}
+async function searchApi(q) {
+  const found = await fetchApi(BASE + "?f=search&tz=UTC&s=" + encodeURIComponent(q));
+  return found || [];
+}
+var latestCache = null;
+async function latestApi() {
+  if (!latestCache) {
+    latestCache = fetchApi(BASE + "?f=latest&tz=UTC").catch(() => null);
   }
-  return pickItems(text);
+  const entries = await latestCache;
+  if (!entries) latestCache = null;
+  return entries || [];
 }
-function itemToResult(raw, opts) {
-  const title = pickTag(raw, "title");
-  const hash = pickTag(raw, "infoHash") || pickTag(raw, "nyaa:infoHash");
-  if (!title || !hash) return null;
-  if (hitsExclusion(title, opts.exclusions)) return null;
-  const hashLower = String(hash).toLowerCase();
-  const seeders = parseInt(pickTag(raw, "seeders"), 10) || 0;
-  const leechers = parseInt(pickTag(raw, "leechers"), 10) || 0;
-  const size = parseSize(pickTag(raw, "size"));
-  const pubDate = pickTag(raw, "pubDate");
-  const parsed = pubDate ? new Date(pubDate) : /* @__PURE__ */ new Date();
-  const date = Number.isFinite(parsed.getTime()) ? parsed : /* @__PURE__ */ new Date(0);
-  return {
-    title,
-    link: buildMagnet(hashLower, title),
-    hash: hashLower,
-    seeders,
-    leechers,
-    downloads: 0,
-    size,
-    date,
-    accuracy: "high",
-    type: void 0
-  };
+function episodeMatches(entryEpisode, wanted) {
+  if (wanted == null) return true;
+  const e = String(entryEpisode || "").trim();
+  if (!e) return false;
+  if (e.includes("-") || e.includes("~")) return false;
+  const n = parseInt(e, 10);
+  return Number.isInteger(n) && n === Number(wanted);
 }
-async function runSearch(query, opts) {
-  if (!query.titles || !query.titles.length) return [];
-  const ctx = searchContext(query, opts.batch ? "batch" : "single");
-  const queries = buildQueries(query.titles, { limit: 2, episode: query.episode, anilistId: query.anilistId });
-  const shaped = await collectFeed(
-    queries,
-    fetchFeed,
-    (raw) => itemToResult(raw, { exclusions: ctx.exclusions }),
-    ctx,
-    SOURCE_DEFAULT
+function isBatchEntry(entry) {
+  const e = String(entry.episode || "");
+  if (/\d+\s*[-~]\s*\d+/.test(e)) return true;
+  if (/batch/i.test(e)) return true;
+  return false;
+}
+function entryToResults(entry, opts) {
+  const downloads = Array.isArray(entry.downloads) ? entry.downloads : [];
+  const date = entry.release_date ? new Date(entry.release_date) : /* @__PURE__ */ new Date();
+  const out = [];
+  for (const dl of downloads) {
+    if (!dl || !dl.magnet) continue;
+    const { hash, size } = parseMagnet(dl.magnet);
+    if (!hash) continue;
+    const res = dl.res ? dl.res + "p" : "";
+    const title = "[SubsPlease] " + entry.key + (res ? " (" + res + ")" : "");
+    if (hitsExclusion(title, opts.exclusions)) continue;
+    out.push({
+      title,
+      link: dl.magnet,
+      hash,
+      seeders: 0,
+      leechers: 0,
+      downloads: 0,
+      size,
+      date,
+      accuracy: "high",
+      type: void 0
+    });
+  }
+  return out;
+}
+async function runSearch(query, mode) {
+  if (!query || !query.titles || !query.titles.length) return [];
+  const ctx = { mode, exclusions: query.exclusions || [], episode: query.episode };
+  const seenKeys = /* @__PURE__ */ new Set();
+  const entries = [];
+  const settled = await Promise.allSettled(
+    query.titles.map((q) => searchApi(q))
   );
-  return finalize(shaped, ctx);
+  for (const s of settled) {
+    if (s.status === "rejected") continue;
+    for (const e of s.value) {
+      if (seenKeys.has(e.key)) continue;
+      seenKeys.add(e.key);
+      entries.push(e);
+    }
+  }
+  if (!entries.length) {
+    for (const e of await latestApi()) {
+      if (seenKeys.has(e.key)) continue;
+      seenKeys.add(e.key);
+      entries.push(e);
+    }
+  }
+  const out = [];
+  const seenHashes = /* @__PURE__ */ new Set();
+  for (const e of entries) {
+    const isBatch = isBatchEntry(e);
+    if (mode === "batch" && !isBatch) continue;
+    if (mode === "movie" && isBatch) continue;
+    if (query.episode != null && !isBatch && !episodeMatches(e.episode, query.episode)) continue;
+    for (const r of entryToResults(e, ctx)) {
+      if (seenHashes.has(r.hash)) continue;
+      seenHashes.add(r.hash);
+      out.push(r);
+    }
+  }
+  return finalize(out, ctx);
 }
 var subsplease_default = new class SubsPlease {
   async single(query) {
-    return runSearch(query, { episode: query.episode });
+    return runSearch(query, "single");
   }
   async batch(query) {
-    const results = await runSearch(query, { batch: true });
-    return results.filter((r) => /batch|complete|season/i.test(r.title));
+    return runSearch(query, "batch");
   }
   async movie(query) {
-    return runSearch(query, { movie: true });
+    return runSearch(query, "movie");
   }
   async test() {
-    await fetchFeed("one piece");
+    const res = await httpGet(BASE + "?f=latest&tz=UTC");
+    if (!res.ok) throw new Error("SubsPlease returned HTTP " + res.status);
     return true;
   }
 }();

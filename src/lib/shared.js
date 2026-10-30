@@ -150,3 +150,16 @@ export function finalize (results, ctx) {
   }
   return unique
 }
+
+export const BATCH_PATTERNS = [
+  /\bbatch\b/i,
+  /\bcomplete\b/i,
+  /\bseason\s*\d+\b/i,
+  /\bs\d{1,2}\b(?!\s*e\d)/i,
+  /\b\d{1,3}\s*[-~]\s*\d{1,3}\b/
+]
+
+export function looksLikeBatch (title) {
+  if (!title) return false
+  return BATCH_PATTERNS.some(p => p.test(title))
+}

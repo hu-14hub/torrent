@@ -1,87 +1,104 @@
-import {
-  buildMagnet, parseSize, pickTag, pickItems, httpGet,
-  buildQueries, searchContext, collectFeed, finalize, hitsExclusion
-} from './lib/shared.js'
+import { buildMagnet, hitsExclusion, looksLikeBatch, finalize } from './lib/shared.js'
+import { httpGet } from './lib/shared.js'
 
-// CONFIGURE YOUR CUSTOM DOMAIN HERE.
-// Replace 'https://feed.animetosho.org' with your own AnimeTosho mirror/domain.
-const BASE = 'https://feed.animetosho.org'
-
+const BASE = 'https://feed.animetosho.org/json'
 const SOURCE_DEFAULT = 'high'
 
-async function fetchFeed (query) {
-  // AnimeTosho-style RSS/feed endpoint. Adjust the path if your domain uses a different URL structure.
-  const url = BASE + '/?q=' + encodeURIComponent(query)
+async function fetchJson (url) {
   const res = await httpGet(url)
-  if (!res.ok) {
-    throw new Error('AnimeTosho returned HTTP ' + res.status)
-  }
-  const text = await res.text()
-  if (!text.includes('<rss') && !text.includes('<item>')) {
-    throw new Error('AnimeTosho returned an unexpected response')
-  }
-  return pickItems(text)
+  if (!res.ok) throw new Error('AnimeTosho returned HTTP ' + res.status)
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
 }
 
-function itemToResult (raw, opts) {
-  const title = pickTag(raw, 'title')
-  const hash = pickTag(raw, 'infoHash') || pickTag(raw, 'nyaa:infoHash')
-  if (!title || !hash) return null
-
-  if (hitsExclusion(title, opts.exclusions)) return null
-
-  const hashLower = String(hash).toLowerCase()
-  const seeders = parseInt(pickTag(raw, 'seeders'), 10) || 0
-  const leechers = parseInt(pickTag(raw, 'leechers'), 10) || 0
-  const size = parseSize(pickTag(raw, 'size'))
-  const pubDate = pickTag(raw, 'pubDate')
-  const parsed = pubDate ? new Date(pubDate) : new Date()
-  const date = Number.isFinite(parsed.getTime()) ? parsed : new Date(0)
-
+function toResult (item) {
+  const hash = String(item.info_hash || item.hash || '').toLowerCase()
+  if (!hash) return null
   return {
-    title,
-    link: buildMagnet(hashLower, title),
-    hash: hashLower,
-    seeders,
-    leechers,
-    downloads: 0,
-    size,
-    date,
-    accuracy: 'high',
-    type: undefined
+    title: item.title || item.torrent_name || '',
+    link: item.magnet_uri || buildMagnet(hash, item.title || item.torrent_name || ''),
+    hash,
+    seeders: Number(item.seeders) || 0,
+    leechers: Number(item.leechers) || 0,
+    downloads: Number(item.torrent_downloaded_count || item.downloads) || 0,
+    size: Number(item.total_size || item.size) || 0,
+    date: item.timestamp ? new Date(item.timestamp * 1000) : new Date(),
+    accuracy: 'high'
   }
 }
 
-async function runSearch (query, opts) {
-  if (!query.titles || !query.titles.length) return []
-  const ctx = searchContext(query, opts.batch ? 'batch' : 'single')
-  const queries = buildQueries(query.titles, { limit: 2, episode: query.episode, anilistId: query.anilistId })
-  const shaped = await collectFeed(
-    queries,
-    fetchFeed,
-    raw => itemToResult(raw, { exclusions: ctx.exclusions }),
-    ctx,
-    SOURCE_DEFAULT
-  )
-  return finalize(shaped, ctx)
+async function fetchByEid (eid) {
+  const items = await fetchJson(BASE + '?eid=' + encodeURIComponent(eid))
+  return items.map(toResult).filter(Boolean)
+}
+
+async function fetchByAid (aid) {
+  const items = await fetchJson(BASE + '?aid=' + encodeURIComponent(aid))
+  return items.map(toResult).filter(Boolean)
+}
+
+async function fetchByText (query) {
+  const titles = query.titles || []
+  if (!titles.length) return []
+  const seen = new Map()
+  const allQueries = []
+  for (const t of titles) {
+    allQueries.push(String(t).trim())
+    if (query.episode != null) allQueries.push(String(t).trim() + ' ' + query.episode)
+  }
+  for (const q of allQueries) {
+    try {
+      const items = await fetchJson(BASE + '?q=' + encodeURIComponent(q))
+      for (const i of items) {
+        const r = toResult(i)
+        if (r && !seen.has(r.hash)) seen.set(r.hash, r)
+      }
+    } catch { continue }
+  }
+  return [...seen.values()]
+}
+
+async function search (query, mode) {
+  const ctx = { mode, exclusions: query.exclusions || [], episode: query.episode }
+  let raw = []
+
+  if (mode === 'single' && query.anidbEid != null) {
+    try { raw = await fetchByEid(query.anidbEid) } catch { raw = [] }
+  } else if (query.anilistId != null) {
+    try { raw = await fetchByAid(query.anilistId) } catch { raw = [] }
+  }
+
+  const results = raw.filter(r => !hitsExclusion(r.title, ctx.exclusions))
+
+  if (query.titles && query.titles.length) {
+    const textResults = await fetchByText(query)
+    const seen = new Set(results.map(r => r.hash))
+    for (const r of textResults) {
+      if (seen.has(r.hash)) continue
+      seen.add(r.hash)
+      results.push(r)
+    }
+  }
+
+  return finalize(results, ctx)
 }
 
 export default new class AnimeTosho {
   async single (query) {
-    return runSearch(query, { episode: query.episode })
+    return search(query, 'single')
   }
 
   async batch (query) {
-    const results = await runSearch(query, { batch: true })
-    return results.filter(r => /batch|complete|season/i.test(r.title))
+    const results = await search(query, 'batch')
+    return results.filter(r => looksLikeBatch(r.title)).map(r => ({ ...r, type: 'batch', accuracy: 'low' }))
   }
 
   async movie (query) {
-    return runSearch(query, { movie: true })
+    return search(query, 'movie')
   }
 
   async test () {
-    await fetchFeed('one piece')
+    await fetchJson(BASE + '?q=test')
     return true
   }
 }()

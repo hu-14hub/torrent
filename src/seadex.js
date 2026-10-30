@@ -1,83 +1,110 @@
-import {
-  buildMagnet, parseSize, pickTag, pickItems, httpGet,
-  buildQueries, searchContext, collectFeed, finalize, hitsExclusion
-} from './lib/shared.js'
+import { buildMagnet, finalize } from './lib/shared.js'
+import { httpGet } from './lib/shared.js'
 
-const BASE = 'https://releases.moe'
-const SOURCE_DEFAULT = 'high'
+const BASE = 'https://releases.moe/api/collections/entries/records'
 
-async function fetchFeed (query) {
-  const url = BASE + '/?q=' + encodeURIComponent(query)
-  const res = await httpGet(url)
-  if (!res.ok) {
-    throw new Error('Seadex returned HTTP ' + res.status)
+function totalSize (files) {
+  if (!Array.isArray(files)) return 0
+  let s = 0
+  for (const f of files) {
+    const len = Number(f && f.length)
+    if (Number.isFinite(len)) s += len
   }
-  const text = await res.text()
-  if (!text.includes('<rss') && !text.includes('<item>')) {
-    throw new Error('Seadex returned an unexpected response')
-  }
-  return pickItems(text)
+  return s
 }
 
-function itemToResult (raw, opts) {
-  const title = pickTag(raw, 'title')
-  const hash = pickTag(raw, 'infoHash') || pickTag(raw, 'nyaa:infoHash')
-  if (!title || !hash) return null
+function firstFilename (files) {
+  if (!Array.isArray(files) || !files.length) return ''
+  const f = files.find(x => x && x.name)
+  return f ? f.name : ''
+}
 
-  if (hitsExclusion(title, opts.exclusions)) return null
+function cleanReleaseTitle (filename) {
+  if (!filename) return ''
+  return filename
+    .replace(/\s*-?\s*S\d{1,2}E\d{1,3}(?:v\d)?\b/gi, '')
+    .replace(/\s+-\s+\d{1,4}(?:v\d)?\b/g, '')
+    .replace(/\.(mkv|mp4|avi|m2ts|webm)$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
-  const hashLower = String(hash).toLowerCase()
-  const seeders = parseInt(pickTag(raw, 'seeders'), 10) || 0
-  const leechers = parseInt(pickTag(raw, 'leechers'), 10) || 0
-  const size = parseSize(pickTag(raw, 'size'))
-  const pubDate = pickTag(raw, 'pubDate')
-  const parsed = pubDate ? new Date(pubDate) : new Date()
-  const date = Number.isFinite(parsed.getTime()) ? parsed : new Date(0)
+function isBatchRelease (files) {
+  if (!Array.isArray(files)) return false
+  const videoFiles = files.filter(f => f && f.name && /\.(mkv|mp4|avi|m2ts|webm)$/i.test(f.name))
+  if (videoFiles.length > 1) return true
+  return totalSize(files) > 10 * 1024 ** 3
+}
 
+async function fetchByAnilist (anilistId) {
+  const url = BASE +
+    '?expand=trs' +
+    '&perPage=10' +
+    '&filter=' + encodeURIComponent('(alID=' + Number(anilistId) + ')')
+  const res = await httpGet(url)
+  if (!res.ok) throw new Error('Seadex returned HTTP ' + res.status)
+  const data = await res.json()
+  if (!data || !Array.isArray(data.items)) return []
+  return data.items
+}
+
+function flattenTrs (items) {
+  const out = []
+  for (const entry of items) {
+    const trs = entry && entry.expand && entry.expand.trs
+    if (!Array.isArray(trs)) continue
+    for (const tr of trs) {
+      if (!tr || !tr.infoHash) continue
+      out.push(tr)
+    }
+  }
+  return out
+}
+
+function toResult (tr) {
+  const hash = String(tr.infoHash || '').toLowerCase()
+  if (!hash) return null
+  const cleanName = cleanReleaseTitle(firstFilename(tr.files))
+  const group = tr.releaseGroup ? '[' + tr.releaseGroup + '] ' : ''
+  const dual = tr.dualAudio ? ' (Dual Audio)' : ''
+  const title = group + (cleanName || tr.releaseGroup || 'release') + dual
+  const batch = isBatchRelease(tr.files)
   return {
     title,
-    link: buildMagnet(hashLower, title),
-    hash: hashLower,
-    seeders,
-    leechers,
+    link: buildMagnet(hash, cleanName),
+    hash,
+    seeders: 0,
+    leechers: 0,
     downloads: 0,
-    size,
-    date,
+    size: totalSize(tr.files),
+    date: tr.created ? new Date(tr.created) : new Date(),
     accuracy: 'high',
-    type: undefined
+    type: tr.isBest ? 'best' : (batch ? 'batch' : 'alt')
   }
 }
 
-async function runSearch (query, opts) {
-  if (!query.titles || !query.titles.length) return []
-  const ctx = searchContext(query, opts.batch ? 'batch' : 'single')
-  const queries = buildQueries(query.titles, { limit: 2, episode: query.episode, anilistId: query.anilistId })
-  const shaped = await collectFeed(
-    queries,
-    fetchFeed,
-    raw => itemToResult(raw, { exclusions: ctx.exclusions }),
-    ctx,
-    SOURCE_DEFAULT
-  )
-  return finalize(shaped, ctx)
+async function search (query) {
+  if (!query || !query.anilistId) return []
+  const items = await fetchByAnilist(query.anilistId)
+  const seen = new Set()
+  const out = []
+  for (const tr of flattenTrs(items)) {
+    const r = toResult(tr)
+    if (!r || seen.has(r.hash)) continue
+    seen.add(r.hash)
+    out.push(r)
+  }
+  return finalize(out, { mode: 'single', exclusions: [] })
 }
 
 export default new class Seadex {
-  async single (query) {
-    return runSearch(query, { episode: query.episode })
-  }
-
-  async batch (query) {
-    const results = await runSearch(query, { batch: true })
-    return results.filter(r => /batch|complete|season/i.test(r.title))
-  }
-
-  async movie (query) {
-    return runSearch(query, { movie: true })
-  }
+  async single (query) { return search(query) }
+  async batch (query) { return search(query) }
+  async movie (query) { return search(query) }
 
   async test () {
-    await fetchFeed('one piece')
+    const res = await httpGet(BASE + '?perPage=1')
+    if (!res.ok) throw new Error('Seadex returned HTTP ' + res.status)
     return true
   }
 }()
