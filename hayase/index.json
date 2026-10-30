@@ -56,8 +56,8 @@
     "url": "aHR0cHM6Ly9yZWxlYXNlcy5tb2U=",
     "description": "Manually curated best releases per anime, looked up by AniList ID.",
     "icon": "https://releases.moe/favicon.png",
-    "update": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/hayase/index.json",
-    "code": "https://raw.githubusercontent.com/YOUR_USERNAME/hayase-extension-pack/main/dist/seadex.js"
+    "update": "https://raw.githubusercontent.com/hu-14hub/torrent/main/hayase/index.json",
+    "code": "https://raw.githubusercontent.com/hu-14hub/torrent/main/dist/seadex.js"
   },
   {
     "manifestVersion": 2,
